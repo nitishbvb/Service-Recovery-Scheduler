@@ -24,25 +24,60 @@ void broadcastLiveState(const fs::path& mailboxDir, std::string_view serviceName
     }
 }
 
+// Background worker thread function to seek user input for state queries
+void userInputQueryLoop(const RecoveryScheduler& scheduler) {
+    std::string inputTarget;
+    // Allow the server startup boot prints to clear first
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+    while (true) {
+        std::cout << "\n[Interactive Query] Enter service name to check state (or 'exit'): ";
+        std::cin >> inputTarget;
+
+        if (inputTarget == "exit") {
+            std::cout << "[Interactive Query] Stopping terminal interface thread.\n";
+            break;
+        }
+
+        // Thread-safely access the in-memory core engine using the reader lock
+        auto state = scheduler.queryServiceState(inputTarget);
+
+        std::cout << "-----------------------------------------\n";
+        if (state) {
+            std::cout << "  Service: " << inputTarget << "\n";
+            std::cout << "  Current Level Index: " << state->currentIndex << "\n";
+            std::cout << "  Last Action Taken:   " << to_string(state->lastActionTaken) << "\n";
+        } else {
+            std::cout << "  Service '" << inputTarget << "' has no live failure history logs.\n";
+        }
+        std::cout << "-----------------------------------------\n";
+    }
+}
+
 int main() {
     RecoveryScheduler scheduler;
 
     // Services registered explicitly at startup phase 
     scheduler.registerService("auth-service", std::vector{
         RecoveryAction::RESTART, 
-        RecoveryAction::RESTART, 
-        RecoveryAction::DISABLE
+        RecoveryAction::STOP, 
+        RecoveryAction::DISABLE,
+        RecoveryAction::START
     });
     
-    scheduler.registerService("payment-gateway", std::vector{
+    scheduler.registerService("payment-service", std::vector{
         RecoveryAction::RESTART, 
-        RecoveryAction::STOP
+        RecoveryAction::STOP,
+        RecoveryAction::DISABLE
     });
 
     fs::path mailboxDir = fs::current_path() / "ipc_mailbox";
     fs::create_directories(mailboxDir);
 
     std::cout << "[Scheduler Server] Monitoring file-queue path: " << mailboxDir.string() << "\n";
+
+    // Start the background user-input interactive diagnostic thread
+    std::thread inputThread(userInputQueryLoop, std::ref(scheduler));
 
     while (true) {
         std::error_code ec;

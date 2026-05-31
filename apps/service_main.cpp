@@ -35,7 +35,7 @@ int main() {
     std::this_thread::sleep_for(std::chrono::seconds(1));
 
     // --- TRIGGER FAILURE SEQUENCE EVENT 1 ---
-    std::cout << "\n[Local Crash] Encountered file lock error! Dropping alert token 1...\n";
+    std::cout << "\n[Simulate Failure] alert 1...\n";
     {
         std::ofstream file(mailboxDir / (identityName + ".fail"));
     } // Closes file handle explicitly to flush block state
@@ -45,7 +45,7 @@ int main() {
     std::this_thread::sleep_for(std::chrono::seconds(1));
 
     // --- TRIGGER FAILURE SEQUENCE EVENT 2 ---
-    std::cout << "\n[Local Crash] Network thread timeout! Dropping alert token 2...\n";
+    std::cout << "\n[Simulate Failure] alert 2...\n";
     {
         std::ofstream file(mailboxDir / (identityName + ".fail"));
     }

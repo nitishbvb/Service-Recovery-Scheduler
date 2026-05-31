@@ -12,7 +12,10 @@
 enum class RecoveryAction { 
     RESTART = 0, 
     STOP = 1, 
-    DISABLE = 2 
+    DISABLE = 2,
+    START = 3,
+    SUSPEND = 4,
+    RECOVER = 5
 };
 
 // Helper utility to safely convert enum state values to string logs
@@ -21,6 +24,9 @@ inline std::string_view to_string(RecoveryAction action) {
         case RecoveryAction::RESTART: return "RESTART";
         case RecoveryAction::STOP:    return "STOP";
         case RecoveryAction::DISABLE: return "DISABLE";
+        case RecoveryAction::START:   return "START";
+        case RecoveryAction::SUSPEND: return "SUSPEND";
+        case RecoveryAction::RECOVER: return "RECOVER";
     }
     return "UNKNOWN";
 }

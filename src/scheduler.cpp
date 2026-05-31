@@ -1,5 +1,6 @@
 #include <scheduler.hpp>
 #include <mutex>
+#include <iostream>
 
 void RecoveryScheduler::registerService(std::string_view name, std::span<const RecoveryAction> recoverySequence) {
     std::unique_lock lock(m_mutex); // Writer lock protection block
@@ -8,6 +9,14 @@ void RecoveryScheduler::registerService(std::string_view name, std::span<const R
         .sequence = std::vector<RecoveryAction>(recoverySequence.begin(), recoverySequence.end())
     };
     m_configs[std::string(name)] = std::move(meta);
+    // generate code to print this m_Configs map to cout for debug visibility   
+    for (const auto& [serviceName, serviceMeta] : m_configs) {
+        std::cout << "[Config Register] Service: " << serviceName << " | Recovery Sequence: ";
+        for (const auto& action : serviceMeta.sequence) {
+            std::cout << to_string(action) << " ";
+        }
+        std::cout << "\n";
+    }
 }
 
 std::optional<RecoveryAction> RecoveryScheduler::processFailure(std::string_view name) {

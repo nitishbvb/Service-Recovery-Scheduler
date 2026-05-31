@@ -1,104 +1,62 @@
+# 🪐 Service Recovery Scheduler
 
-# 🪐 Cross-Platform Service Recovery Scheduler (gRPC)
-
-A modern, platform-independent C++20 library and runtime framework that manages cascading recovery actions for monitored network microservices using gRPC.
-
----
-
-## 🏗️ Architectural Blueprint
-
-The platform decouples business logic, state tracking, and network transport using a bi-directional **gRPC Event Gateway** pattern.
-
-|          SERVICE PROCESS           |             |         SCHEDULER PROCESS          ||                                    |             |                                    || +--------------------------------+ |   gRPC RPC  | +--------------------------------+ || |       Service gRPC Server      | | <=========  | |    Scheduler gRPC Server       | || | (Implements Recovery Steps)    | |             | | (Receives Failure Signals)     | || +--------------------------------+ |             | +--------------------------------+ ||                 │                  |             |                 │                  ||                 ▼ Calls            |   gRPC RPC  |                 ▼ Dispatches       ||          [NotifyFailure]           | ==========> |     [Core Library Engine]          |+------------------------------------+             +------------------------------------+
-
-
-*   **Core Engine Library (`recovery_scheduler`)**: A pure in-memory data tracking module protected by internal reader-writer locks (`std::shared_mutex`). It handles state evaluation without any network code dependencies, making it 100% unit-testable.
-*   **Scheduler Daemon (`scheduler_server`)**: A runnable process host encapsulating the core library. It listens for inbound failures from target applications and makes outbound gRPC client calls to trigger remote recovery operations.
-*   **Recovery Agent (`mock_service_client`)**: A separate process template that monitors application conditions, updates the scheduler server, and exposes an endpoint to process automated recovery actions (e.g., `RESTART`, `STOP`, `DISABLE`).
+A lightweight, platform-independent C++20 library and runtime framework that manages cascading recovery actions for monitored services.
 
 ---
 
-## 🛠️ Machine Prerequisites
+##  How it Works
 
-Ensure your machine has a C++20 toolchain and gRPC/Protobuf dependencies installed:
+The system uses a **decoupled, file-based Inter-Process Communication (IPC)** model. Processes communicate by dropping simple files inside a shared `ipc_mailbox` folder.
 
-### 🪟 On Windows
-*   **Compiler**: Visual Studio 2022 (with "Desktop development with C++" workload installed).
-*   **Package Manager**: Install `grpc` and `protobuf` via **vcpkg**:
-    ```powershell
-    vcpkg install grpc protobuf
-    ```
-
-### 🐧 On Linux (Ubuntu/Debian)
-*   **Compiler**: GCC 11+ or Clang 13+
-*   **Dependencies**:
-    ```bash
-    sudo apt install build-essential cmake libgrpc++-dev protobuf-compiler-grpc
-    ```
+*   **Core Library (`recovery_scheduler`)**: A pure in-memory state engine protected by thread-safe locks (`std::shared_mutex`). It handles all recovery logic and is 100% unit-testable.
+*   **Server Process (`scheduler_server`)**: A background daemon that watches the mailbox directory for failure signals and updates the core library state.
+*   **Client Process (`mock_service_client`)**: A separate standalone app that simulates crashes by dropping temporary flag files into the mailbox.
 
 ---
 
-## 💻 Working Inside VS Code (Any OS)
+##  Prerequisites
 
-This project fully supports the native VS Code CMake workflow:
-
-1.  **Install Extensions**: Install **C/C++** and **CMake Tools** from the extensions marketplace.
-2.  **Open Project**: Open the root directory of this project in VS Code.
-3.  **Select a Kit**: Press `Ctrl+Shift+P` (or `Cmd+Shift+P` on macOS), type `CMake: Select a Kit`, and choose your C++20 compiler.
-4.  **Configure & Build**: Press `F7` (or click **Build** on the bottom status bar). CMake will automatically invoke `protoc` and generate the network stub codes behind the scenes.
-5.  **Run Tests**: Click the **Testing** icon on the left sidebar to discover and execute the GoogleTest suite.
+*   **Compiler**: Any compiler supporting the C++20 standard (like Visual Studio 2022 on Windows).
+*   **Testing Framework**: Prebuilt GoogleTest installed at `C:\gRPC_Libs\googletest`.
 
 ---
 
-## ⚡ Running the Multi-Process System
+##  How to Build and Run in VS Code
 
-Because the Scheduler and the Service run as completely independent processes, you must open **two separate terminal windows** to watch them interact.
+1.  **Open Project**: Open the root directory of this project in VS Code.
+2.  **Select Variant**: On the bottom status bar, set your build variant to **Debug** (to match your prebuilt GoogleTest profile).
+3.  **Build**: Press **`F7`** to build the entire project.
+4.  **Run the Tests**: Click the **Testing** icon on the left sidebar to discover and run the `scheduler_tests` suite.
 
-### 1️⃣ Terminal 1: Run the Scheduler Server
-Navigate to your build output directory and start the central orchestrator:
+---
 
-```bash
-# Windows (PowerShell/CMD)
+##  Running the Multi-Process System
+
+Because the Scheduler and the Client run as separate applications, you need to open **two separate terminal windows** to watch them talk to each other.
+
+### Terminal 1: Start the Scheduler Server
+Navigate to your project directory and launch the main backend daemon:
+```powershell
 .\build\bin\Debug\scheduler_server.exe
-
-# Linux / macOS
-./build/bin/scheduler_server
 ```
-*(Expected Output: `[Scheduler Server] Listening across platform boundary on 0.0.0.0:50051`)*
+*(Output: `[Scheduler Server] Monitoring file-queue path: ...`)*
 
-### 2️⃣ Terminal 2: Run the Monitored Service Application
-In a separate terminal tab, spin up the mock service:
-
-```bash
-# Windows (PowerShell/CMD)
+### Terminal 2: Start the Mock Service Client
+In a second terminal window, run the client simulation app:
+```powershell
 .\build\bin\Debug\mock_service_client.exe
-
-# Linux / macOS
-./build/bin/mock_service_client
 ```
 
-### 🔄 What Happens Next?
-1.  The **Service** starts up and exposes its own recovery server endpoint on port `6001`.
-2.  The **Service** sends a `RegisterService` gRPC network message to the central scheduler process (port `50051`) uploading its fallback timeline configuration (`RESTART → DISABLE`).
-3.  The **Service** encounters a simulated error and calls `NotifyFailure`.
-4.  The **Scheduler Daemon** captures the signal, references its local library data state, and **sends a remote network command back** commanding the application thread to execute an active `RESTART`.
+###  The Execution Loop
+1.  The **Client** experiences a simulated error and drops an empty file named `auth-service.fail` into the mailbox folder.
+2.  The **Server** detects the file, increments the recovery escalation level in the core library, and writes out a persistent `auth-service.state` file containing the new state.
+3.  The **Server** deletes the temporary `.fail` file to acknowledge it.
+4.  The **Client** reads the updated `.state` file from disk and confirms the action (e.g., `RESTART` or `DISABLE`).
 
 ---
 
-## 🧪 Testing the Core Library
+##  Key Design Highlights
 
-To execute the unit test runner in isolation without spinning up network ports or sockets:
-
-```bash
-cd build
-ctest --output-on-failure
-```
-
----
-
-## 💡 Key Design Decisions & Justifications
-
-*   **Platform Independence**: Abandoned UNIX named pipes/sockets in favour of gRPC. This allows the scheduling application to compile natively on Windows, macOS, or Linux, and communicate across completely different cloud nodes over standard TCP.
-*   **Extensibility**: Traditional stdout logging or exit codes do not allow active management. By enforcing a bi-directional gRPC channel, the scheduler actively remediates the target application dynamically.
-*   **Separation of Concerns**: The core engine library (`recovery_scheduler`) has zero dependency on gRPC headers. This ensures your logical state changes can be checked in microsecond speeds through unit tests without standing up real servers.
-*   **Thread Safety**: Live tracking blocks use `std::shared_mutex`. Multiple parallel reader threads can call `queryState()` concurrently, while failure write steps are held in strict exclusive isolation.
+*   **Zero Dependency Friction**: By using native C++20 `std::filesystem` as a message queue, we completely avoided complex network linking errors and missing runtime `.dll` issues on Windows.
+*   **Thread Safety**: Internal state storage is fully guarded with `std::shared_mutex`. Multiple threads can query service states simultaneously without blocking, while write/failure events run in strict isolation.
+*   **Separation of Concerns**: The core recovery engine has no knowledge of how messages travel. It is written as a pure, decoupled C++ library target that can be easily dropped into any future project.
