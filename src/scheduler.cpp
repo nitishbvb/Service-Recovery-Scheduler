@@ -1,18 +1,17 @@
-#include "scheduler.hpp"
+#include <scheduler.hpp>
 #include <mutex>
 
-void RecoveryScheduler::registerService(std::string_view name, std::string_view address, std::span<const RecoveryAction> seq) {
-    std::unique_lock lock(m_mutex); // Writer Lock
+void RecoveryScheduler::registerService(std::string_view name, std::span<const RecoveryAction> recoverySequence) {
+    std::unique_lock lock(m_mutex); // Writer lock protection block
     
     ServiceMetadata meta{
-        .targetAddress = std::string(address),
-        .sequence = std::vector<RecoveryAction>(seq.begin(), seq.end())
+        .sequence = std::vector<RecoveryAction>(recoverySequence.begin(), recoverySequence.end())
     };
     m_configs[std::string(name)] = std::move(meta);
 }
 
-std::optional<std::pair<std::string, RecoveryAction>> RecoveryScheduler::processFailure(std::string_view name) {
-    std::unique_lock lock(m_mutex); // Writer Lock
+std::optional<RecoveryAction> RecoveryScheduler::processFailure(std::string_view name) {
+    std::unique_lock lock(m_mutex); // Writer lock protection block
     
     std::string key(name);
     auto configIt = m_configs.find(key);
@@ -21,21 +20,22 @@ std::optional<std::pair<std::string, RecoveryAction>> RecoveryScheduler::process
     }
 
     const auto& config = configIt->second;
-    auto& state = m_states[key]; // Automatically creates state if missing
+    auto& state = m_states[key]; // Dynamically generates baseline tracker if blank
 
     size_t indexToExecute = state.currentIndex;
-    RecoveryAction action = config.sequence[indexToExecute];
+    RecoveryAction actionToTake = config.sequence[indexToExecute];
+    state.lastActionTaken = actionToTake;
 
-    // Escalate to next index, capping at final element sequence boundaries
+    // Escalate to next sequential index level up, capping safely at final barrier element
     if (state.currentIndex + 1 < config.sequence.size()) {
         state.currentIndex++;
     }
 
-    return std::make_pair(config.targetAddress, action);
+    return actionToTake;
 }
 
 std::optional<LiveState> RecoveryScheduler::queryServiceState(std::string_view name) const {
-    std::shared_lock lock(m_mutex); // Reader Lock (Allows simultaneous queries)
+    std::shared_lock lock(m_mutex); // Reader lock protection (Allows multiple simultaneous queries)
     
     auto it = m_states.find(std::string(name));
     if (it != m_states.end()) {

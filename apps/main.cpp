@@ -1,68 +1,78 @@
 #include <iostream>
-#include <memory>
-#include <grpcpp/grpcpp.h>
-#include "scheduler.grpc.pb.h"
-#include <recovery_scheduler/scheduler.hpp>
+#include <fstream>
+#include <filesystem>
+#include <thread>
+#include <chrono>
+#include <scheduler.hpp>
 
-using namespace grpc;
-using namespace recoveryscheduler;
+namespace fs = std::filesystem;
 
-class SchedulerServiceImpl final : public SchedulerService::Service {
-private:
-    RecoveryScheduler m_coreEngine;
+// Atomically serializes state out to disk using a standard temporary swap move
+void broadcastLiveState(const fs::path& mailboxDir, std::string_view serviceName, const LiveState& state) {
+    std::string filename = std::string(serviceName) + ".state";
+    fs::path tempFile = mailboxDir / (filename + ".tmp");
+    fs::path finalFile = mailboxDir / filename;
 
-    // Utility map to cleanly bridge Protobuf enums to standard C++ enums
-    RecoveryAction mapEnum(ActionType act) {
-        return static_cast<RecoveryAction>(act);
+    std::ofstream out(tempFile, std::ios::trunc);
+    if (out.is_open()) {
+        out << "Current_Sequence_Level: " << state.currentIndex << "\n";
+        out << "Last_Action_Executed: " << to_string(state.lastActionTaken) << "\n";
+        out.close();
+
+        std::error_code ec;
+        fs::rename(tempFile, finalFile, ec); // Ensures atomic swap transaction on target systems
     }
-
-public:
-    Status RegisterService(ServerContext* ctx, const RegisterRequest* req, RegisterResponse* res) override {
-        std::vector<RecoveryAction> seq;
-        for (int i = 0; i < req->recovery_sequence_size(); ++i) {
-            seq.push_back(mapEnum(req->recovery_sequence(i)));
-        }
-        m_coreEngine.registerService(req->service_name(), req->target_address(), seq);
-        res->set_success(true);
-        return Status::OK;
-    }
-
-    Status NotifyFailure(ServerContext* ctx, const FailureRequest* req, FailureResponse* res) override {
-        auto outcome = m_coreEngine.processFailure(req->service_name());
-        if (!outcome) {
-            res->set_success(false);
-            return Status::NOT_FOUND;
-        }
-
-        auto [targetAddress, actionToTake] = *outcome;
-
-        // EXTENSIBILITY LINK: Actively command the service process to execute recovery
-        auto channel = CreateChannel(targetAddress, InsecureChannelCredentials());
-        auto stub = ServiceRecoveryAgent::NewStub(channel);
-
-        RecoveryRequest recoveryReq;
-        recoveryReq.set_action(static_cast<ActionType>(actionToTake));
-        RecoveryResponse recoveryRes;
-        ClientContext clientCtx;
-
-        Status rpcStatus = stub->ExecuteRecovery(&clientCtx, recoveryReq, &recoveryRes);
-
-        res->set_action_dispatched(static_cast<ActionType>(actionToTake));
-        res->set_success(rpcStatus.ok() && recoveryRes.success());
-        return Status::OK;
-    }
-};
+}
 
 int main() {
-    std::string server_address("0.0.0.0:50051");
-    SchedulerServiceImpl service;
+    RecoveryScheduler scheduler;
 
-    ServerBuilder builder;
-    builder.AddListeningPort(server_address, InsecureServerCredentials());
-    builder.RegisterService(&service);
+    // Services registered explicitly at startup phase 
+    scheduler.registerService("auth-service", std::vector{
+        RecoveryAction::RESTART, 
+        RecoveryAction::RESTART, 
+        RecoveryAction::DISABLE
+    });
     
-    std::unique_ptr<Server> server(builder.BuildAndStart());
-    std::cout << "[Scheduler Server] Listening across platform boundary on " << server_address << "\n";
-    server->Wait();
+    scheduler.registerService("payment-gateway", std::vector{
+        RecoveryAction::RESTART, 
+        RecoveryAction::STOP
+    });
+
+    fs::path mailboxDir = fs::current_path() / "ipc_mailbox";
+    fs::create_directories(mailboxDir);
+
+    std::cout << "[Scheduler Server] Monitoring file-queue path: " << mailboxDir.string() << "\n";
+
+    while (true) {
+        std::error_code ec;
+        if (fs::exists(mailboxDir, ec)) {
+            for (const auto& entry : fs::directory_iterator(mailboxDir)) {
+                if (entry.is_regular_file() && entry.path().extension() == ".fail") {
+                    
+                    std::string serviceName = entry.path().stem().string();
+                    std::cout << "[Inbound Event] Failure token detected for: " << serviceName << "\n";
+
+                    // 1. Dispatch signal into our core recovery library engine
+                    auto activeAction = scheduler.processFailure(serviceName);
+
+                    if (activeAction) {
+                        std::cout << "[Action Order] Dispatched execution target: " << to_string(*activeAction) << "\n";
+                        
+                        // 2. Query updated tracking state and write structural state metrics back out
+                        if (auto liveState = scheduler.queryServiceState(serviceName)) {
+                            broadcastLiveState(mailboxDir, serviceName, *liveState);
+                        }
+                    } else {
+                        std::cout << "[Error] Reported service '" << serviceName << "' lacks tracking metadata configs.\n";
+                    }
+
+                    // 3. Consume the command transaction by safely removing the inbound token flag
+                    fs::remove(entry.path(), ec);
+                }
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Restrict excessive loop spin-hammering
+    }
     return 0;
 }

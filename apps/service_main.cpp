@@ -1,61 +1,56 @@
 #include <iostream>
-#include <memory>
+#include <fstream>
+#include <filesystem>
 #include <thread>
-#include <grpcpp/grpcpp.h>
-#include "scheduler.grpc.pb.h"
+#include <string>
 
-using namespace grpc;
-using namespace recoveryscheduler;
+namespace fs = std::filesystem;
 
-// Service implements the recovery receiver interface
-class RecoveryAgentImpl final : public ServiceRecoveryAgent::Service {
-public:
-    Status ExecuteRecovery(ServerContext* ctx, const RecoveryRequest* req, RecoveryResponse* res) override {
-        std::cout << "[Service Agent] Received REMOTE Command to take Action ID: " << req->action() << "\n";
-        // Perform local structural changes (clear buffers, reset sockets, exit)
-        res->set_success(true);
-        return Status::OK;
+// Utility execution tool to read active metrics out from cross-process system registries
+void displayCurrentExternalState(const fs::path& mailboxDir, const std::string& serviceName) {
+    fs::path stateFile = mailboxDir / (serviceName + ".state");
+    std::this_thread::sleep_for(std::chrono::milliseconds(150)); // Allow server execution delay gaps
+
+    if (!fs::exists(stateFile)) {
+        std::cout << "[Query Link] No history profile file generated yet for: " << serviceName << "\n";
+        return;
     }
-};
 
-void run_agent_server() {
-    std::string agent_address("0.0.0.0:6001");
-    RecoveryAgentImpl service;
-    ServerBuilder builder;
-    builder.AddListeningPort(agent_address, InsecureServerCredentials());
-    builder.RegisterService(&service);
-    std::unique_ptr<Server> server(builder.BuildAndStart());
-    server->Wait();
+    std::ifstream in(stateFile);
+    std::string configLine;
+    std::cout << "\n=========================================\n";
+    std::cout << " LIVE SCHEDULER STATE FOR: " << serviceName << "\n";
+    std::cout << "=========================================\n";
+    while (std::getline(in, configLine)) {
+        std::cout << "  " << configLine << "\n";
+    }
+    std::cout << "=========================================\n";
 }
 
 int main() {
-    // 1. Run local recovery receiver server context in a dedicated background worker
-    std::thread serverThread(run_agent_server);
+    fs::path mailboxDir = fs::current_path() / "ipc_mailbox";
+    std::string identityName = "auth-service";
 
-    // 2. Connect to central Scheduler Process
-    auto channel = CreateChannel("localhost:50051", InsecureChannelCredentials());
-    auto stub = SchedulerService::NewStub(channel);
+    std::cout << "[Service Client Process] Starting system logic processing arrays...\n";
+    std::this_thread::sleep_for(std::chrono::seconds(1));
 
-    // 3. Register self at startup
-    RegisterRequest regReq;
-    regReq.set_service_name("auth-service");
-    regReq.set_target_address("localhost:6001"); // Where scheduler can reach us back
-    regReq.add_recovery_sequence(ActionType::RESTART);
-    regReq.add_recovery_sequence(ActionType::DISABLE);
+    // --- TRIGGER FAILURE SEQUENCE EVENT 1 ---
+    std::cout << "\n[Local Crash] Encountered file lock error! Dropping alert token 1...\n";
+    {
+        std::ofstream file(mailboxDir / (identityName + ".fail"));
+    } // Closes file handle explicitly to flush block state
 
-    RegisterResponse regRes;
-    ClientContext regCtx;
-    stub->RegisterService(&regCtx, regReq, &regRes);
+    displayCurrentExternalState(mailboxDir, identityName);
 
-    // 4. Simulate hitting an issue later down the road
-    std::cout << "[Service Logic] Hit unrecoverable file state lock! Notifying master scheduler...\n";
-    FailureRequest failReq;
-    failReq.set_service_name("auth-service");
-    FailureResponse failRes;
-    ClientContext failCtx;
-    
-    stub->NotifyFailure(&failCtx, failReq, &failRes);
+    std::this_thread::sleep_for(std::chrono::seconds(1));
 
-    serverThread.join();
+    // --- TRIGGER FAILURE SEQUENCE EVENT 2 ---
+    std::cout << "\n[Local Crash] Network thread timeout! Dropping alert token 2...\n";
+    {
+        std::ofstream file(mailboxDir / (identityName + ".fail"));
+    }
+
+    displayCurrentExternalState(mailboxDir, identityName);
+
     return 0;
 }
