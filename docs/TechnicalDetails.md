@@ -54,3 +54,4 @@ When a service continues to crash after reaching the end of its registered recov
 
 ### 3. Separation of Transport Logic
 By separating file parsing code into the execution binaries (`main.cpp` and `service_main.cpp`), the underlying core engine library maintains zero dependencies on directory trees or string parsers. This structural isolation allows the core state machine library to be integrated into any future network socket, RPC, or message broker framework with zero modifications.
+
