@@ -25,6 +25,7 @@ The local file system is leveraged as an asynchronous, transaction-based message
 
 ### 3. Process Runtime Targets (apps/ binaries)
 The final layer consists of the standalone execution binaries running in isolated memory spaces. The scheduler_server daemon manages the host thread pool, driving the file monitoring loop on its main thread while hosting an interactive user terminal query thread via a reader lock (std::shared_lock). On the other side, the mock_service_client manages the target application. It handles user inputs to trigger simulated failures on a background thread, while its main thread monitors file write times to read incoming scheduler actions and execute localized dummy prints.
+
 ---
 
 ## 🔒 Thread Safety & Memory Synchronization
