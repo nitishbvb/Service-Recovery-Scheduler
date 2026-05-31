@@ -88,14 +88,25 @@ int main() {
                     std::string serviceName = entry.path().stem().string();
                     std::cout << "[Inbound Event] Failure token detected for: " << serviceName << "\n";
 
-                    // 1. Dispatch signal into our core recovery library engine
+
+                    if (auto liveState = scheduler.queryServiceState(serviceName)) {
+                            std::cout << "\n BEFORE - Current State: " << liveState->currentIndex << "\n";
+                            std::cout << "BEFORE - Last Action Taken: " << to_string(liveState->lastActionTaken) << "\n";
+                            broadcastLiveState(mailboxDir, serviceName, *liveState);
+                        } else {
+                            std::cout << "\n No prior state found for '" << serviceName << "'.\n";
+                        }
+                    
+                    //  Dispatch signal into our core recovery library engine
                     auto activeAction = scheduler.processFailure(serviceName);
 
                     if (activeAction) {
                         std::cout << "[Action Order] Dispatched execution target: " << to_string(*activeAction) << "\n";
                         
-                        // 2. Query updated tracking state and write structural state metrics back out
+                        // Query updated tracking state and write structural state metrics back out
                         if (auto liveState = scheduler.queryServiceState(serviceName)) {
+                            std::cout << "New Current State: " << liveState->currentIndex << "\n";
+                            std::cout << "New Last Action Taken: " << to_string(liveState->lastActionTaken) << "\n";
                             broadcastLiveState(mailboxDir, serviceName, *liveState);
                         }
                     } else {

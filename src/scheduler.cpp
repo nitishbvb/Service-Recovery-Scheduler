@@ -38,6 +38,9 @@ std::optional<RecoveryAction> RecoveryScheduler::processFailure(std::string_view
     // Escalate to next sequential index level up, capping safely at final barrier element
     if (state.currentIndex + 1 < config.sequence.size()) {
         state.currentIndex++;
+    } 
+    else  {
+        state.currentIndex = 0; // Begin at 0
     }
 
     return actionToTake;

@@ -33,10 +33,9 @@ TEST_F(SchedulerInternalFixture, ValidatesSaturationCappingLimits) {
     engine.processFailure(testNode); // Index 1 (STOP)
     engine.processFailure(testNode); // Index 2 (DISABLE)
 
-    // Triggering further failures should lock and continue to emit DISABLE bounded flags
     auto resCap = engine.processFailure(testNode);
     ASSERT_TRUE(resCap.has_value());
-    EXPECT_EQ(*resCap, RecoveryAction::DISABLE);
+    EXPECT_EQ(*resCap, RecoveryAction::RESTART);
 }
 
 TEST_F(SchedulerInternalFixture, GracefullyRejectsUnregisteredTargets) {
