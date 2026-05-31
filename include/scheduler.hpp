@@ -11,7 +11,7 @@
 enum class RecoveryAction { RESTART, STOP, DISABLE };
 
 struct ServiceMetadata {
-    std::string targetAddress; // Target gRPC server location of the service
+    std::string targetAddress;
     std::vector<RecoveryAction> sequence;
 };
 
@@ -22,16 +22,17 @@ struct LiveState {
 class RecoveryScheduler {
 public:
     RecoveryScheduler() = default;
+    
+    // Disable copying to enforce strict architectural integrity
+    RecoveryScheduler(const RecoveryScheduler&) = delete;
+    RecoveryScheduler& operator=(const RecoveryScheduler&) = delete;
 
-    // Registers service configurations
     void registerService(std::string_view name, std::string_view address, std::span<const RecoveryAction> seq);
-
-    // Moves step forward and returns the target address and action to take
     std::optional<std::pair<std::string, RecoveryAction>> processFailure(std::string_view name);
+    std::optional<LiveState> queryServiceState(std::string_view name) const;
 
 private:
     std::unordered_map<std::string, ServiceMetadata> m_configs;
     std::unordered_map<std::string, LiveState> m_states;
     mutable std::shared_mutex m_mutex;
 };
-

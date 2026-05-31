@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include <recovery_scheduler/scheduler.hpp>
+#include <scheduler.hpp>
 #include <thread>
 #include <chrono>
 
